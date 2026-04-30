@@ -1,0 +1,22 @@
+{
+  "name": "monopoly-deal-online",
+  "version": "1.0.0",
+  "description": "Online multiplayer Monopoly Deal card game for 4 players",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently \"node src/server/index.js\" \"vite\"",
+    "dev:server": "node src/server/index.js",
+    "dev:client": "vite",
+    "build": "vite build",
+    "start": "node src/server/index.js"
+  },
+  "dependencies": {
+    "express": "^4.21.0",
+    "socket.io": "^4.7.5",
+    "socket.io-client": "^4.7.5"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "vite": "^5.4.0"
+  }
+}
