@@ -442,6 +442,9 @@ export class GameEngine {
     if (this.playsThisTurn >= MAX_PLAYS_PER_TURN && this.phase === PHASES.PLAY) {
       if (player.hand.length > MAX_HAND_SIZE) {
         this.phase = PHASES.DISCARD;
+      } else {
+        // All plays used and hand size is fine — auto-advance the turn
+        this._advanceTurn();
       }
     }
   }

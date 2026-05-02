@@ -10,12 +10,26 @@ import { fileURLToPath } from 'url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const server = createServer(app);
-const io = new Server(server, { cors: { origin: '*' } });
+const io = new Server(server, {
+  cors: { origin: '*' },
+  // Increase timeouts for production stability
+  pingTimeout: 60000,
+  pingInterval: 25000,
+});
 const rooms = new RoomManager();
 
-// Serve static files in production
-app.use(express.static(path.join(__dirname, '../../dist')));
-app.get('/health', (_, res) => res.json({ status: 'ok' }));
+// Serve static files in production (the built Vite output)
+const distPath = path.join(__dirname, '../../dist');
+app.use(express.static(distPath));
+
+app.get('/health', (_, res) => res.json({ status: 'ok', rooms: rooms.getRoomCount?.() || 0 }));
+
+// SPA fallback — serve index.html for any non-API/non-socket route
+app.get('*', (req, res) => {
+  // Don't intercept socket.io or API routes
+  if (req.path.startsWith('/socket.io')) return;
+  res.sendFile(path.join(distPath, 'index.html'));
+});
 
 // Broadcast game state to all players in a room
 function broadcastState(room) {
@@ -39,6 +53,7 @@ function processBots(room) {
       const player = room.game.getPlayer(target.playerId);
       if (player?.isBot && !target.resolved) {
         setTimeout(() => {
+          if (!room.game || room.game.phase === PHASES.GAME_OVER) return;
           BotAI.handlePayment(room.game, target.playerId);
           broadcastState(room);
           processBots(room);
@@ -52,6 +67,7 @@ function processBots(room) {
   const current = room.game.players[room.game.currentPlayerIndex];
   if (current?.isBot && room.game.phase !== PHASES.GAME_OVER) {
     setTimeout(() => {
+      if (!room.game || room.game.phase === PHASES.GAME_OVER) return;
       if (room.game.phase === PHASES.DRAW) {
         BotAI.takeTurn(room.game, current.id);
       }
@@ -207,4 +223,4 @@ function sanitizeRoom(room) {
 }
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`🎴 Monopoly Deal server running on port ${PORT}`));
+server.listen(PORT, '0.0.0.0', () => console.log(`🎴 Monopoly Deal server running on port ${PORT}`));

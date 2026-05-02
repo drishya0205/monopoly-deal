@@ -68,6 +68,7 @@ export class RoomManager {
   }
 
   getRoom(code) { return this.rooms.get(code); }
+  getRoomCount() { return this.rooms.size; }
 
   getRoomForPlayer(playerId) {
     const code = this.playerToRoom.get(playerId);

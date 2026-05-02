@@ -7,9 +7,38 @@ const app = document.getElementById('app');
 
 let state = { screen: 'lobby', playerId: null, roomCode: null, room: null, gameState: null, selectedCard: null };
 
+// Payment overlay state — persisted across renders
+let paymentState = { active: false, selectedCardIds: new Set(), debtAmount: 0 };
+
 // --- Socket Events ---
 socket.on('room-updated', (room) => { state.room = room; render(); });
-socket.on('game-state', (gs) => { state.gameState = gs; state.screen = gs.winner ? 'victory' : 'game'; render(); });
+socket.on('game-state', (gs) => {
+  const prevPhase = state.gameState?.phase;
+  state.gameState = gs;
+  state.screen = gs.winner ? 'victory' : 'game';
+
+  // If a payment overlay is active and we're still in payment phase, don't re-render the whole game
+  // Just check if our debt was resolved (e.g. by Just Say No or we already paid)
+  if (paymentState.active && gs.phase === PHASES.PAYMENT && gs.pendingAction) {
+    const myDebt = gs.pendingAction.targets.find(t => t.playerId === state.playerId && !t.resolved);
+    if (!myDebt) {
+      // Our debt was resolved, close the overlay
+      paymentState.active = false;
+      paymentState.selectedCardIds.clear();
+      render();
+    }
+    // Otherwise, don't re-render — keep the overlay stable
+    return;
+  }
+
+  // If we left payment phase, clear payment state
+  if (gs.phase !== PHASES.PAYMENT) {
+    paymentState.active = false;
+    paymentState.selectedCardIds.clear();
+  }
+
+  render();
+});
 
 function emit(event, data = {}) {
   return new Promise((resolve) => socket.emit(event, data, resolve));
@@ -180,10 +209,14 @@ function renderGame() {
   // Your area
   renderYourArea(me, gs, isMyTurn);
 
-  // Overlays
+  // Payment overlay
   if (gs.phase === PHASES.PAYMENT && gs.pendingAction) {
     const myDebt = gs.pendingAction.targets.find(t => t.playerId === state.playerId && !t.resolved);
-    if (myDebt) renderPaymentOverlay(me, myDebt);
+    if (myDebt) {
+      paymentState.active = true;
+      paymentState.debtAmount = myDebt.amount;
+      renderPaymentOverlay(me, myDebt);
+    }
   }
 
   if (gs.winner) {
@@ -248,8 +281,15 @@ function renderYourArea(me, gs, isMyTurn) {
     const actDiv = document.createElement('div');
     actDiv.className = 'hand-actions';
     const sel = me.hand?.find(c => c.id === state.selectedCard);
+    const playsLeft = gs.playsRemaining ?? (3 - gs.playsThisTurn);
 
-    if (sel) {
+    // Plays remaining indicator
+    const playsInfo = document.createElement('span');
+    playsInfo.style.cssText = `font-size:0.8rem;color:${playsLeft === 0 ? 'var(--danger)' : 'var(--text-muted)'};margin-right:8px;font-weight:600;`;
+    playsInfo.textContent = playsLeft === 0 ? '⚠️ No plays left!' : `${playsLeft} play${playsLeft !== 1 ? 's' : ''} left`;
+    actDiv.appendChild(playsInfo);
+
+    if (sel && playsLeft > 0) {
       // Property play
       if (sel.type === CARD_TYPES.PROPERTY || sel.type === CARD_TYPES.PROPERTY_WILDCARD) {
         const btn = makeBtn('🏠 Play Property', 'btn-success btn-sm', () => {
@@ -274,10 +314,18 @@ function renderYourArea(me, gs, isMyTurn) {
           handleActionPlay(sel, gs);
         }));
       }
+    } else if (sel && playsLeft === 0) {
+      showToast('⚠️ You\'ve used all 3 plays! End your turn.');
+      state.selectedCard = null;
     }
 
-    actDiv.appendChild(makeBtn('⏭ End Turn', 'btn-danger btn-sm', () => {
-      emit('end-turn');
+    actDiv.appendChild(makeBtn('⏭ End Turn', 'btn-danger btn-sm', async () => {
+      const result = await emit('end-turn');
+      if (result?.error && result?.needsDiscard) {
+        showToast(`⚠️ You have ${me.hand?.length} cards — discard to 7 first!`);
+      } else if (result?.error) {
+        showToast(result.error);
+      }
       state.selectedCard = null;
     }));
     area.appendChild(actDiv);
@@ -286,8 +334,8 @@ function renderYourArea(me, gs, isMyTurn) {
   // Discard notice
   if (gs.phase === PHASES.DISCARD && isMyTurn) {
     const notice = document.createElement('div');
-    notice.style.cssText = 'color:var(--warning);font-weight:700;font-size:0.85rem;';
-    notice.textContent = `⚠️ Discard to 7 cards (click cards to discard). Have: ${me.hand?.length || 0}`;
+    notice.style.cssText = 'color:var(--warning);font-weight:700;font-size:0.85rem;padding:8px 12px;background:rgba(245,158,11,0.1);border-radius:8px;border:1px solid rgba(245,158,11,0.3);';
+    notice.textContent = `⚠️ Too many cards! Discard to 7 (click cards to discard). You have: ${me.hand?.length || 0}`;
     area.appendChild(notice);
   }
 }
@@ -378,7 +426,13 @@ function renderPaymentOverlay(me, debt) {
   // Check for Just Say No
   const jsn = me.hand?.find(c => c.action === ACTION_TYPES.JUST_SAY_NO);
 
-  let selected = new Set();
+  // Use the persisted payment state
+  const selected = paymentState.selectedCardIds;
+
+  // Remove any selected IDs that no longer exist (e.g. stale state)
+  for (const id of selected) {
+    if (!allCards.find(c => c.id === id)) selected.delete(id);
+  }
 
   function renderInner() {
     const selectedTotal = allCards.filter(c => selected.has(c.id)).reduce((s, c) => s + (c.value || 0), 0);
@@ -394,6 +448,8 @@ function renderPaymentOverlay(me, debt) {
     if (jsn) {
       const jsnBtn = makeBtn('🚫 Just Say No!', 'btn-danger', () => {
         emit('just-say-no', { cardId: jsn.id });
+        paymentState.active = false;
+        paymentState.selectedCardIds.clear();
         overlay.remove();
       });
       panel.appendChild(jsnBtn);
@@ -413,16 +469,39 @@ function renderPaymentOverlay(me, debt) {
     });
     panel.appendChild(cardsDiv);
 
-    const payBtn = makeBtn(`Pay ${selectedTotal}M`, 'btn-primary btn-lg', () => {
-      emit('pay-debt', { cardIds: [...selected] });
-      overlay.remove();
-    });
-    payBtn.disabled = selectedTotal < debt.amount && totalAssets >= debt.amount;
-    panel.appendChild(payBtn);
+    if (allCards.length > 0) {
+      const payBtn = makeBtn(`💰 Pay ${selectedTotal}M`, 'btn-primary btn-lg', () => {
+        emit('pay-debt', { cardIds: [...selected] });
+        paymentState.active = false;
+        paymentState.selectedCardIds.clear();
+        overlay.remove();
+      });
+      // Disable pay button if you haven't selected enough and you have enough assets
+      payBtn.disabled = selectedTotal < debt.amount && totalAssets >= debt.amount;
+      if (payBtn.disabled) {
+        payBtn.style.opacity = '0.5';
+        payBtn.style.cursor = 'not-allowed';
+      }
+      panel.appendChild(payBtn);
+
+      // Allow underpay if total assets < debt (you give everything)
+      if (totalAssets < debt.amount && totalAssets > 0) {
+        const payAllBtn = makeBtn(`Pay everything I have (${totalAssets}M)`, 'btn-secondary', () => {
+          const allIds = allCards.map(c => c.id);
+          emit('pay-debt', { cardIds: allIds });
+          paymentState.active = false;
+          paymentState.selectedCardIds.clear();
+          overlay.remove();
+        });
+        panel.appendChild(payAllBtn);
+      }
+    }
 
     if (totalAssets === 0) {
       const nothingBtn = makeBtn("I have nothing to pay!", 'btn-secondary', () => {
         emit('pay-debt', { cardIds: [] });
+        paymentState.active = false;
+        paymentState.selectedCardIds.clear();
         overlay.remove();
       });
       panel.appendChild(nothingBtn);
