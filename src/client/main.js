@@ -228,12 +228,16 @@ function renderGame() {
 function renderPropertySets(container, player) {
   for (const [color, cards] of Object.entries(player.properties || {})) {
     if (!cards || cards.length === 0) continue;
-    const group = document.createElement('div');
-    group.className = 'property-group';
-    const needed = SET_SIZES[color] || 2;
-    const complete = cards.length >= needed;
-    cards.forEach(c => group.appendChild(renderCard(c, { mini: true, complete })));
-    container.appendChild(group);
+    
+    const setDiv = document.createElement('div');
+    setDiv.className = 'property-set';
+    
+    cards.forEach((card) => {
+      const el = renderCard(card, {});
+      setDiv.appendChild(el);
+    });
+    
+    container.appendChild(setDiv);
   }
 }
 
@@ -340,14 +344,14 @@ function renderYourArea(me, gs, isMyTurn) {
   }
 }
 
-function handleActionPlay(card, gs) {
+async function handleActionPlay(card, gs) {
   const opponents = gs.players.filter(p => p.id !== state.playerId);
 
   if (card.type === CARD_TYPES.RENT) {
     const colors = card.colors === 'all' ? Object.keys(COLOR_NAMES) : card.colors;
-    const color = colors.length === 1 ? colors[0] : promptColorFromList(colors);
+    const color = colors.length === 1 ? colors[0] : await promptColorFromList(colors);
     if (!color) { state.selectedCard = null; render(); return; }
-    const targetId = card.colors === 'all' ? promptTarget(opponents) : undefined;
+    const targetId = card.colors === 'all' ? await promptTarget(opponents) : undefined;
     if (card.colors === 'all' && !targetId) { state.selectedCard = null; render(); return; }
 
     // Check for Double the Rent in hand
@@ -362,47 +366,47 @@ function handleActionPlay(card, gs) {
     case ACTION_TYPES.PASS_GO:
       return emitAction(card.id, 'action');
     case ACTION_TYPES.DEBT_COLLECTOR: {
-      const tid = promptTarget(opponents);
+      const tid = await promptTarget(opponents);
       if (tid) return emitAction(card.id, { type: 'action', targetId: tid });
       break;
     }
     case ACTION_TYPES.BIRTHDAY:
       return emitAction(card.id, 'action');
     case ACTION_TYPES.SLY_DEAL: {
-      const tid = promptTarget(opponents);
+      const tid = await promptTarget(opponents);
       if (!tid) break;
       const target = gs.players.find(p => p.id === tid);
-      const tcid = promptStealableProperty(target, 'Select a property to steal:');
+      const tcid = await promptStealableProperty(target, 'Select a property to steal:');
       if (tcid) return emitAction(card.id, { type: 'action', targetId: tid, targetCardId: tcid });
       break;
     }
     case ACTION_TYPES.DEAL_BREAKER: {
-      const tid = promptTarget(opponents);
+      const tid = await promptTarget(opponents);
       if (!tid) break;
       const target = gs.players.find(p => p.id === tid);
       const colors = Object.entries(target.properties || {}).filter(([c, cards]) => cards.length >= (SET_SIZES[c] || 2)).map(([c]) => c);
       if (colors.length === 0) { alert('No complete sets to steal!'); break; }
-      const color = colors.length === 1 ? colors[0] : promptColorFromList(colors);
+      const color = colors.length === 1 ? colors[0] : await promptColorFromList(colors);
       if (color) return emitAction(card.id, { type: 'action', targetId: tid, targetColor: color });
       break;
     }
     case ACTION_TYPES.FORCED_DEAL: {
-      const tid = promptTarget(opponents);
+      const me = gs.players.find(p => p.id === state.playerId);
+      const mycid = await promptStealableProperty(me, 'Select YOUR property to give:');
+      if (!mycid) break;
+      const tid = await promptTarget(opponents);
       if (!tid) break;
       const target = gs.players.find(p => p.id === tid);
-      const tcid = promptStealableProperty(target, 'Select THEIR property to take:');
+      const tcid = await promptStealableProperty(target, 'Select THEIR property to take:');
       if (!tcid) break;
-      const me = gs.players.find(p => p.id === state.playerId);
-      const mycid = promptStealableProperty(me, 'Select YOUR property to give:');
-      if (mycid) return emitAction(card.id, { type: 'action', targetId: tid, targetCardId: tcid, myCardId: mycid });
-      break;
+      return emitAction(card.id, { type: 'action', targetId: tid, targetCardId: tcid, myCardId: mycid });
     }
     case ACTION_TYPES.HOUSE:
     case ACTION_TYPES.HOTEL: {
       const me = gs.players.find(p => p.id === state.playerId);
       const complete = Object.entries(me.properties || {}).filter(([c, cards]) => cards.length >= (SET_SIZES[c] || 2) && c !== 'railroad' && c !== 'utility').map(([c]) => c);
       if (complete.length === 0) { alert('No eligible complete sets!'); break; }
-      const color = complete.length === 1 ? complete[0] : promptColorFromList(complete);
+      const color = complete.length === 1 ? complete[0] : await promptColorFromList(complete);
       if (color) return emitAction(card.id, { type: 'action', targetColor: color });
       break;
     }
@@ -619,7 +623,10 @@ async function promptPropertyFromPlayer(player, msg = 'Select a property') {
   const div = document.createElement('div');
   div.className = 'selectable-cards';
   allProps.forEach(c => {
-    const el = renderCard(c, { onClick: function() { this.closest('.overlay')._resolve(c.id); } });
+    const el = renderCard(c, { onClick: () => {
+      const ov = document.querySelector('.overlay');
+      if (ov && ov._resolve) ov._resolve(c.id);
+    }});
     div.appendChild(el);
   });
   return createModal(msg, `From ${player.name}'s properties`, div);
@@ -636,7 +643,10 @@ async function promptStealableProperty(player, msg) {
   const div = document.createElement('div');
   div.className = 'selectable-cards';
   stealableProps.forEach(c => {
-    const el = renderCard(c, { onClick: function() { this.closest('.overlay')._resolve(c.id); } });
+    const el = renderCard(c, { onClick: () => {
+      const ov = document.querySelector('.overlay');
+      if (ov && ov._resolve) ov._resolve(c.id);
+    }});
     div.appendChild(el);
   });
   return createModal(msg, `From ${player.name}'s properties`, div);

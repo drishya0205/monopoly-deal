@@ -410,12 +410,32 @@ body {
 .property-sets {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 12px;
+  margin-top: 8px;
 }
 
-.property-group {
+.property-set {
   display: flex;
-  gap: 2px;
+  flex-direction: column;
+}
+
+.property-set .card {
+  margin-top: -105px;
+  box-shadow: 0 -2px 10px rgba(0,0,0,0.3);
+  transition: all var(--transition);
+}
+
+.property-set .card:first-child {
+  margin-top: 0;
+  box-shadow: none;
+}
+
+.property-set:hover .card {
+  margin-top: -35px;
+}
+
+.property-set:hover .card:first-child {
+  margin-top: 0;
 }
 
 /* Mini card (for opponent display) */

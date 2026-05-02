@@ -66,9 +66,12 @@ function processBots(room) {
   // Handle bot turns
   const current = room.game.players[room.game.currentPlayerIndex];
   if (current?.isBot && room.game.phase !== PHASES.GAME_OVER) {
+    // If we're waiting for a human to pay, do nothing. The human's action will trigger the next processBots.
+    if (room.game.phase === PHASES.PAYMENT) return;
+
     setTimeout(() => {
       if (!room.game || room.game.phase === PHASES.GAME_OVER) return;
-      if (room.game.phase === PHASES.DRAW) {
+      if (room.game.phase === PHASES.DRAW || room.game.phase === PHASES.PLAY) {
         BotAI.takeTurn(room.game, current.id);
       }
       broadcastState(room);
