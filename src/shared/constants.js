@@ -108,8 +108,8 @@ export const COLOR_HEX = {
   [COLORS.YELLOW]:     '#FFD700',
   [COLORS.GREEN]:      '#228B22',
   [COLORS.DARK_BLUE]:  '#00008B',
-  [COLORS.RAILROAD]:   '#2F2F2F',
-  [COLORS.UTILITY]:    '#90EE90',
+  [COLORS.RAILROAD]:   '#000000',
+  [COLORS.UTILITY]:    '#98FF98',
 };
 
 // Display names for colors
@@ -122,8 +122,8 @@ export const COLOR_NAMES = {
   [COLORS.YELLOW]:     'Yellow',
   [COLORS.GREEN]:      'Green',
   [COLORS.DARK_BLUE]:  'Dark Blue',
-  [COLORS.RAILROAD]:   'Railroad',
-  [COLORS.UTILITY]:    'Utility',
+  [COLORS.RAILROAD]:   'Black',
+  [COLORS.UTILITY]:    'Mint Green',
 };
 
 // Property names by color

@@ -152,8 +152,8 @@ io.on('connection', (socket) => {
     const room = rooms.getRoomForPlayer(playerId);
     if (!room?.game) return cb({ error: 'No active game' });
     const result = room.game.playCard(playerId, cardId, action);
-    if (result.error) return cb({ error: result.error });
     broadcastState(room);
+    if (result.error) return cb({ error: result.error });
     cb(result);
     processBots(room);
   });

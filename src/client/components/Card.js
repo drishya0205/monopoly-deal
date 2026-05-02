@@ -3,7 +3,7 @@ import { CARD_TYPES, COLOR_HEX, COLOR_NAMES, RENT_VALUES, SET_SIZES } from '../.
 const PROP_COLORS = {
   brown: '#8B4513', light_blue: '#87CEEB', pink: '#E91E90', orange: '#FF8C00',
   red: '#DC143C', yellow: '#FFD700', green: '#228B22', dark_blue: '#1a1acd',
-  railroad: '#3a3a3a', utility: '#7ec87e',
+  railroad: '#000000', utility: '#98FF98',
 };
 
 export function renderCard(card, opts = {}) {

@@ -1,6 +1,6 @@
 import { createDeck, shuffleDeck, getCardValue } from '../shared/cardData.js';
 import {
-  PHASES, CARD_TYPES, ACTION_TYPES, COLORS,
+  PHASES, CARD_TYPES, ACTION_TYPES, COLORS, COLOR_NAMES,
   INITIAL_HAND_SIZE, CARDS_TO_DRAW, CARDS_TO_DRAW_EMPTY_HAND,
   MAX_PLAYS_PER_TURN, MAX_HAND_SIZE, SETS_TO_WIN,
   SET_SIZES, RENT_VALUES, HOUSE_RENT_BONUS, HOTEL_RENT_BONUS,
@@ -103,7 +103,7 @@ export class GameEngine {
     player.properties[color].push(card);
     this.playsThisTurn++;
     this._updateCompletedSets(player);
-    this.addLog(`${player.name} played ${card.name || 'wildcard'} to ${color}`);
+    this.addLog(`${player.name} played ${card.name || 'wildcard'} to ${COLOR_NAMES[color] || color}`);
     if (this._checkWin(player)) return { success: true, type: 'property', winner: player.id };
     this._checkAutoEndTurn(player);
     return { success: true, type: 'property' };
@@ -113,38 +113,50 @@ export class GameEngine {
     if (card.type !== CARD_TYPES.ACTION && card.type !== CARD_TYPES.RENT) {
       return { error: 'Not an action/rent card' };
     }
+
+    // Remove card from hand optimistically
     player.hand.splice(cardIndex, 1);
     this.discardPile.push(card);
     this.playsThisTurn++;
 
+    let result;
     if (card.type === CARD_TYPES.RENT) {
-      return this._handleRent(player, card, action);
+      result = this._handleRent(player, card, action);
+    } else {
+      switch (card.action) {
+        case ACTION_TYPES.PASS_GO:
+          result = this._handlePassGo(player); break;
+        case ACTION_TYPES.DEBT_COLLECTOR:
+          result = this._handleDebtCollector(player, action); break;
+        case ACTION_TYPES.BIRTHDAY:
+          result = this._handleBirthday(player); break;
+        case ACTION_TYPES.SLY_DEAL:
+          result = this._handleSlyDeal(player, action); break;
+        case ACTION_TYPES.FORCED_DEAL:
+          result = this._handleForcedDeal(player, action); break;
+        case ACTION_TYPES.DEAL_BREAKER:
+          result = this._handleDealBreaker(player, action); break;
+        case ACTION_TYPES.HOUSE:
+          result = this._handleHouse(player, action); break;
+        case ACTION_TYPES.HOTEL:
+          result = this._handleHotel(player, action); break;
+        case ACTION_TYPES.JUST_SAY_NO:
+          result = { error: 'Just Say No is played as a response' }; break;
+        case ACTION_TYPES.DOUBLE_RENT:
+          result = { error: 'Double the Rent must be played with a Rent card' }; break;
+        default:
+          result = { error: 'Unknown action' }; break;
+      }
     }
 
-    switch (card.action) {
-      case ACTION_TYPES.PASS_GO:
-        return this._handlePassGo(player);
-      case ACTION_TYPES.DEBT_COLLECTOR:
-        return this._handleDebtCollector(player, action);
-      case ACTION_TYPES.BIRTHDAY:
-        return this._handleBirthday(player);
-      case ACTION_TYPES.SLY_DEAL:
-        return this._handleSlyDeal(player, action);
-      case ACTION_TYPES.FORCED_DEAL:
-        return this._handleForcedDeal(player, action);
-      case ACTION_TYPES.DEAL_BREAKER:
-        return this._handleDealBreaker(player, action);
-      case ACTION_TYPES.HOUSE:
-        return this._handleHouse(player, action);
-      case ACTION_TYPES.HOTEL:
-        return this._handleHotel(player, action);
-      case ACTION_TYPES.JUST_SAY_NO:
-        return { error: 'Just Say No is played as a response' };
-      case ACTION_TYPES.DOUBLE_RENT:
-        return { error: 'Double the Rent must be played with a Rent card' };
-      default:
-        return { error: 'Unknown action' };
+    // Rollback if the action failed — restore card to hand
+    if (result?.error) {
+      this.discardPile.pop();
+      player.hand.splice(cardIndex, 0, card);
+      this.playsThisTurn--;
     }
+
+    return result;
   }
 
   _handlePassGo(player) {
@@ -190,7 +202,7 @@ export class GameEngine {
       targets: targets.map(t => ({ playerId: t, resolved: false, amount })),
     };
     this.phase = PHASES.PAYMENT;
-    this.addLog(`${player.name} charges ${amount}M rent for ${color}`);
+    this.addLog(`${player.name} charges ${amount}M rent for ${COLOR_NAMES[color] || color}`);
     return { success: true, type: 'rent', amount, targets };
   }
 
@@ -292,7 +304,7 @@ export class GameEngine {
     player.properties[action.targetColor].push(...stolen);
     this._updateCompletedSets(player);
     this._updateCompletedSets(target);
-    this.addLog(`${player.name} used Deal Breaker to steal ${action.targetColor} set from ${target.name}!`);
+    this.addLog(`${player.name} used Deal Breaker to steal ${COLOR_NAMES[action.targetColor] || action.targetColor} set from ${target.name}!`);
     if (this._checkWin(player)) return { success: true, type: 'deal_breaker', winner: player.id };
     this._checkAutoEndTurn(player);
     return { success: true, type: 'deal_breaker' };
@@ -301,13 +313,13 @@ export class GameEngine {
   _handleHouse(player, action) {
     if (!action.targetColor) return { error: 'Must specify color' };
     if (action.targetColor === COLORS.RAILROAD || action.targetColor === COLORS.UTILITY) {
-      return { error: 'Cannot add house to Railroad/Utility' };
+      return { error: 'Cannot add house to Black/Mint Green' };
     }
     if (!this._isSetComplete(player, action.targetColor)) return { error: 'Set must be complete' };
     const props = player.properties[action.targetColor];
     if (props.some(c => c._hasHouse)) return { error: 'Already has a house' };
     props[0]._hasHouse = true;
-    this.addLog(`${player.name} built a House on ${action.targetColor}`);
+    this.addLog(`${player.name} built a House on ${COLOR_NAMES[action.targetColor] || action.targetColor}`);
     this._checkAutoEndTurn(player);
     return { success: true, type: 'house' };
   }
@@ -319,7 +331,7 @@ export class GameEngine {
     if (!props.some(c => c._hasHouse)) return { error: 'Must have a house first' };
     if (props.some(c => c._hasHotel)) return { error: 'Already has a hotel' };
     props[0]._hasHotel = true;
-    this.addLog(`${player.name} built a Hotel on ${action.targetColor}`);
+    this.addLog(`${player.name} built a Hotel on ${COLOR_NAMES[action.targetColor] || action.targetColor}`);
     this._checkAutoEndTurn(player);
     return { success: true, type: 'hotel' };
   }
@@ -345,10 +357,21 @@ export class GameEngine {
       }
     }
 
-    // Transfer to source's bank
-    source.bank.push(...cards);
+    // Transfer cards to source (properties go to properties, others to bank)
+    for (const card of cards) {
+      if (card.type === CARD_TYPES.PROPERTY || card.type === CARD_TYPES.PROPERTY_WILDCARD) {
+        const color = card.type === CARD_TYPES.PROPERTY ? card.color : (card.activeColor || card.colors[0]);
+        if (!source.properties[color]) source.properties[color] = [];
+        if (card.type === CARD_TYPES.PROPERTY_WILDCARD) card.activeColor = color;
+        source.properties[color].push(card);
+      } else {
+        source.bank.push(card);
+      }
+    }
+    
     target.resolved = true;
     this._updateCompletedSets(player);
+    this._updateCompletedSets(source);
 
     const totalPaid = cards.reduce((sum, c) => sum + getCardValue(c), 0);
     this.addLog(`${player.name} paid ${totalPaid}M to ${source.name}`);

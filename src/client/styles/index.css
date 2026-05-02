@@ -35,8 +35,8 @@
   --prop-yellow: #FFD700;
   --prop-green: #228B22;
   --prop-dark-blue: #1a1acd;
-  --prop-railroad: #3a3a3a;
-  --prop-utility: #7ec87e;
+  --prop-railroad: #000000;
+  --prop-utility: #98FF98;
 
   /* Sizing */
   --card-w: 90px;

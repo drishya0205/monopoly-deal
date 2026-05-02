@@ -310,8 +310,8 @@ function renderYourArea(me, gs, isMyTurn) {
 
       // Action play
       if (sel.type === CARD_TYPES.ACTION || sel.type === CARD_TYPES.RENT) {
-        actDiv.appendChild(makeBtn('⚡ Play Action', 'btn-primary btn-sm', () => {
-          handleActionPlay(sel, gs);
+        actDiv.appendChild(makeBtn('⚡ Play Action', 'btn-primary btn-sm', async () => {
+          await handleActionPlay(sel, gs);
         }));
       }
     } else if (sel && playsLeft === 0) {
@@ -346,38 +346,34 @@ function handleActionPlay(card, gs) {
   if (card.type === CARD_TYPES.RENT) {
     const colors = card.colors === 'all' ? Object.keys(COLOR_NAMES) : card.colors;
     const color = colors.length === 1 ? colors[0] : promptColorFromList(colors);
-    if (!color) return;
+    if (!color) { state.selectedCard = null; render(); return; }
     const targetId = card.colors === 'all' ? promptTarget(opponents) : undefined;
-    if (card.colors === 'all' && !targetId) return;
+    if (card.colors === 'all' && !targetId) { state.selectedCard = null; render(); return; }
 
     // Check for Double the Rent in hand
     const me = gs.players.find(p => p.id === state.playerId);
     const dtr = me?.hand?.find(c => c.action === ACTION_TYPES.DOUBLE_RENT && c.id !== card.id);
     const doubled = dtr && confirm('Use Double the Rent? (uses 1 extra play)');
 
-    emit('play-card', { cardId: card.id, action: { type: 'action', color, targetId, doubled } });
-    state.selectedCard = null;
-    return;
+    return emitAction(card.id, { type: 'action', color, targetId, doubled });
   }
 
   switch (card.action) {
     case ACTION_TYPES.PASS_GO:
-      emit('play-card', { cardId: card.id, action: 'action' });
-      break;
+      return emitAction(card.id, 'action');
     case ACTION_TYPES.DEBT_COLLECTOR: {
       const tid = promptTarget(opponents);
-      if (tid) emit('play-card', { cardId: card.id, action: { type: 'action', targetId: tid } });
+      if (tid) return emitAction(card.id, { type: 'action', targetId: tid });
       break;
     }
     case ACTION_TYPES.BIRTHDAY:
-      emit('play-card', { cardId: card.id, action: 'action' });
-      break;
+      return emitAction(card.id, 'action');
     case ACTION_TYPES.SLY_DEAL: {
       const tid = promptTarget(opponents);
       if (!tid) break;
       const target = gs.players.find(p => p.id === tid);
-      const tcid = promptPropertyFromPlayer(target);
-      if (tcid) emit('play-card', { cardId: card.id, action: { type: 'action', targetId: tid, targetCardId: tcid } });
+      const tcid = promptStealableProperty(target, 'Select a property to steal:');
+      if (tcid) return emitAction(card.id, { type: 'action', targetId: tid, targetCardId: tcid });
       break;
     }
     case ACTION_TYPES.DEAL_BREAKER: {
@@ -387,18 +383,18 @@ function handleActionPlay(card, gs) {
       const colors = Object.entries(target.properties || {}).filter(([c, cards]) => cards.length >= (SET_SIZES[c] || 2)).map(([c]) => c);
       if (colors.length === 0) { alert('No complete sets to steal!'); break; }
       const color = colors.length === 1 ? colors[0] : promptColorFromList(colors);
-      if (color) emit('play-card', { cardId: card.id, action: { type: 'action', targetId: tid, targetColor: color } });
+      if (color) return emitAction(card.id, { type: 'action', targetId: tid, targetColor: color });
       break;
     }
     case ACTION_TYPES.FORCED_DEAL: {
       const tid = promptTarget(opponents);
       if (!tid) break;
       const target = gs.players.find(p => p.id === tid);
-      const tcid = promptPropertyFromPlayer(target);
+      const tcid = promptStealableProperty(target, 'Select THEIR property to take:');
       if (!tcid) break;
       const me = gs.players.find(p => p.id === state.playerId);
-      const mycid = promptPropertyFromPlayer(me, 'Select YOUR property to give:');
-      if (mycid) emit('play-card', { cardId: card.id, action: { type: 'action', targetId: tid, targetCardId: tcid, myCardId: mycid } });
+      const mycid = promptStealableProperty(me, 'Select YOUR property to give:');
+      if (mycid) return emitAction(card.id, { type: 'action', targetId: tid, targetCardId: tcid, myCardId: mycid });
       break;
     }
     case ACTION_TYPES.HOUSE:
@@ -407,13 +403,23 @@ function handleActionPlay(card, gs) {
       const complete = Object.entries(me.properties || {}).filter(([c, cards]) => cards.length >= (SET_SIZES[c] || 2) && c !== 'railroad' && c !== 'utility').map(([c]) => c);
       if (complete.length === 0) { alert('No eligible complete sets!'); break; }
       const color = complete.length === 1 ? complete[0] : promptColorFromList(complete);
-      if (color) emit('play-card', { cardId: card.id, action: { type: 'action', targetColor: color } });
+      if (color) return emitAction(card.id, { type: 'action', targetColor: color });
       break;
     }
     default:
-      emit('play-card', { cardId: card.id, action: 'action' });
+      return emitAction(card.id, 'action');
   }
   state.selectedCard = null;
+  render();
+}
+
+async function emitAction(cardId, action) {
+  state.selectedCard = null;
+  const result = await emit('play-card', { cardId, action });
+  if (result?.error) {
+    showToast(`❌ ${result.error}`);
+    render();
+  }
 }
 
 function renderPaymentOverlay(me, debt) {
@@ -446,8 +452,9 @@ function renderPaymentOverlay(me, debt) {
     `;
 
     if (jsn) {
-      const jsnBtn = makeBtn('🚫 Just Say No!', 'btn-danger', () => {
-        emit('just-say-no', { cardId: jsn.id });
+      const jsnBtn = makeBtn('🚫 Just Say No!', 'btn-danger', async () => {
+        const result = await emit('just-say-no', { cardId: jsn.id });
+        if (result?.error) { showToast(`❌ ${result.error}`); return; }
         paymentState.active = false;
         paymentState.selectedCardIds.clear();
         overlay.remove();
@@ -470,8 +477,9 @@ function renderPaymentOverlay(me, debt) {
     panel.appendChild(cardsDiv);
 
     if (allCards.length > 0) {
-      const payBtn = makeBtn(`💰 Pay ${selectedTotal}M`, 'btn-primary btn-lg', () => {
-        emit('pay-debt', { cardIds: [...selected] });
+      const payBtn = makeBtn(`💰 Pay ${selectedTotal}M`, 'btn-primary btn-lg', async () => {
+        const result = await emit('pay-debt', { cardIds: [...selected] });
+        if (result?.error) { showToast(`❌ ${result.error}`); return; }
         paymentState.active = false;
         paymentState.selectedCardIds.clear();
         overlay.remove();
@@ -486,9 +494,10 @@ function renderPaymentOverlay(me, debt) {
 
       // Allow underpay if total assets < debt (you give everything)
       if (totalAssets < debt.amount && totalAssets > 0) {
-        const payAllBtn = makeBtn(`Pay everything I have (${totalAssets}M)`, 'btn-secondary', () => {
+        const payAllBtn = makeBtn(`Pay everything I have (${totalAssets}M)`, 'btn-secondary', async () => {
           const allIds = allCards.map(c => c.id);
-          emit('pay-debt', { cardIds: allIds });
+          const result = await emit('pay-debt', { cardIds: allIds });
+          if (result?.error) { showToast(`❌ ${result.error}`); return; }
           paymentState.active = false;
           paymentState.selectedCardIds.clear();
           overlay.remove();
@@ -498,8 +507,9 @@ function renderPaymentOverlay(me, debt) {
     }
 
     if (totalAssets === 0) {
-      const nothingBtn = makeBtn("I have nothing to pay!", 'btn-secondary', () => {
-        emit('pay-debt', { cardIds: [] });
+      const nothingBtn = makeBtn("I have nothing to pay!", 'btn-secondary', async () => {
+        const result = await emit('pay-debt', { cardIds: [] });
+        if (result?.error) { showToast(`❌ ${result.error}`); return; }
         paymentState.active = false;
         paymentState.selectedCardIds.clear();
         overlay.remove();
@@ -548,35 +558,88 @@ function makeBtn(text, cls, onclick) {
   return b;
 }
 
-function promptTarget(opponents) {
-  if (opponents.length === 1) return opponents[0].id;
-  const names = opponents.map((p, i) => `${i + 1}. ${p.name}`).join('\n');
-  const choice = prompt(`Choose a player:\n${names}`);
-  const idx = parseInt(choice) - 1;
-  return opponents[idx]?.id || null;
+function createModal(title, subtitle, contentEl) {
+  return new Promise(resolve => {
+    const overlay = document.createElement('div');
+    overlay.className = 'overlay';
+    const panel = document.createElement('div');
+    panel.className = 'overlay-panel glass-strong';
+    panel.innerHTML = `<h2>${title}</h2>${subtitle ? `<p class="subtitle">${subtitle}</p>` : ''}`;
+    
+    panel.appendChild(contentEl);
+    
+    const cancelBtn = makeBtn('Cancel', 'btn-secondary', () => {
+      overlay.remove();
+      resolve(null);
+    });
+    cancelBtn.style.marginTop = '15px';
+    panel.appendChild(cancelBtn);
+    
+    overlay.appendChild(panel);
+    document.getElementById('app').appendChild(overlay);
+
+    // Helper to resolve and close
+    overlay._resolve = (val) => {
+      overlay.remove();
+      resolve(val);
+    };
+  });
 }
 
-function promptColor() {
-  const colors = Object.keys(COLOR_NAMES);
-  const list = colors.map((c, i) => `${i + 1}. ${COLOR_NAMES[c]}`).join('\n');
-  const choice = prompt(`Choose a color:\n${list}`);
-  return colors[parseInt(choice) - 1] || colors[0];
+async function promptTarget(opponents) {
+  const div = document.createElement('div');
+  div.style.display = 'flex'; div.style.flexDirection = 'column'; div.style.gap = '8px';
+  opponents.forEach(p => {
+    const b = makeBtn(p.name, 'btn-primary', function() { this.closest('.overlay')._resolve(p.id); });
+    div.appendChild(b);
+  });
+  return createModal('Choose a Player', '', div);
 }
 
-function promptColorFromList(colors) {
-  if (colors.length === 1) return colors[0];
-  const list = colors.map((c, i) => `${i + 1}. ${COLOR_NAMES[c] || c}`).join('\n');
-  const choice = prompt(`Choose a color:\n${list}`);
-  return colors[parseInt(choice) - 1] || colors[0];
+async function promptColor() {
+  return promptColorFromList(Object.keys(COLOR_NAMES));
 }
 
-function promptPropertyFromPlayer(player, msg = 'Select a property (enter number):') {
+async function promptColorFromList(colors) {
+  const div = document.createElement('div');
+  div.style.display = 'flex'; div.style.flexDirection = 'column'; div.style.gap = '8px';
+  colors.forEach(c => {
+    const b = makeBtn(COLOR_NAMES[c] || c, 'btn-primary', function() { this.closest('.overlay')._resolve(c); });
+    b.style.backgroundColor = COLOR_HEX[c] || '#444';
+    b.style.color = ['#fff', '#000'].includes(b.style.backgroundColor) ? (c==='railroad'?'#fff':'#000') : '#fff';
+    div.appendChild(b);
+  });
+  return createModal('Choose a Color', '', div);
+}
+
+async function promptPropertyFromPlayer(player, msg = 'Select a property') {
   const allProps = Object.values(player.properties || {}).flat();
-  if (allProps.length === 0) { alert('No properties to select!'); return null; }
-  if (allProps.length === 1) return allProps[0].id;
-  const list = allProps.map((c, i) => `${i + 1}. ${c.name || 'Wildcard'} (${c.color || c.activeColor || '?'})`).join('\n');
-  const choice = prompt(`${msg}\n${list}`);
-  return allProps[parseInt(choice) - 1]?.id || null;
+  if (allProps.length === 0) { showToast('No properties to select!'); return null; }
+  
+  const div = document.createElement('div');
+  div.className = 'selectable-cards';
+  allProps.forEach(c => {
+    const el = renderCard(c, { onClick: function() { this.closest('.overlay')._resolve(c.id); } });
+    div.appendChild(el);
+  });
+  return createModal(msg, `From ${player.name}'s properties`, div);
+}
+
+async function promptStealableProperty(player, msg) {
+  const stealableProps = [];
+  for (const [color, cards] of Object.entries(player.properties || {})) {
+    const needed = SET_SIZES[color] || 2;
+    if (cards.length < needed) stealableProps.push(...cards);
+  }
+  if (stealableProps.length === 0) { showToast('No eligible properties to select!'); return null; }
+  
+  const div = document.createElement('div');
+  div.className = 'selectable-cards';
+  stealableProps.forEach(c => {
+    const el = renderCard(c, { onClick: function() { this.closest('.overlay')._resolve(c.id); } });
+    div.appendChild(el);
+  });
+  return createModal(msg, `From ${player.name}'s properties`, div);
 }
 
 function showToast(msg) {
