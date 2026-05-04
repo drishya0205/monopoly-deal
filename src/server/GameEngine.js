@@ -81,6 +81,41 @@ export class GameEngine {
     return { error: 'Invalid action type' };
   }
 
+  moveWildcard(playerId, cardId, newColor) {
+    const player = this.getPlayer(playerId);
+    if (!player) return { error: 'Player not found' };
+    if (this.phase !== PHASES.PLAY) return { error: 'Cannot move cards outside play phase' };
+    if (this.players[this.currentPlayerIndex].id !== playerId) return { error: 'Not your turn' };
+    
+    // Find the wildcard in properties
+    let card, oldColor, idx;
+    for (const [color, cards] of Object.entries(player.properties)) {
+      idx = cards.findIndex(c => c.id === cardId);
+      if (idx !== -1) {
+        card = cards[idx];
+        oldColor = color;
+        break;
+      }
+    }
+
+    if (!card) return { error: 'Card not found in your properties' };
+    if (card.type !== CARD_TYPES.PROPERTY_WILDCARD) return { error: 'Card is not a wildcard' };
+    if (card.colors !== 'all' && !card.colors.includes(newColor)) return { error: 'Invalid color for this wildcard' };
+    if (oldColor === newColor) return { error: 'Card is already in that color set' };
+
+    // Move it
+    player.properties[oldColor].splice(idx, 1);
+    card.activeColor = newColor;
+    if (!player.properties[newColor]) player.properties[newColor] = [];
+    player.properties[newColor].push(card);
+
+    this._updateCompletedSets(player);
+    this.addLog(`${player.name} moved a wildcard to ${COLOR_NAMES[newColor] || newColor}`);
+    
+    if (this._checkWin(player)) return { success: true, type: 'move_wildcard', winner: player.id };
+    return { success: true, type: 'move_wildcard' };
+  }
+
   _bankCard(player, cardIndex, card) {
     if (card.type === CARD_TYPES.PROPERTY) return { error: 'Cannot bank property cards' };
     if (card.type === CARD_TYPES.PROPERTY_WILDCARD && card.colors === 'all') return { error: 'Rainbow wildcards have no value' };
@@ -96,8 +131,13 @@ export class GameEngine {
     if (card.type !== CARD_TYPES.PROPERTY && card.type !== CARD_TYPES.PROPERTY_WILDCARD) {
       return { error: 'Not a property card' };
     }
-    player.hand.splice(cardIndex, 1);
     const color = card.type === CARD_TYPES.PROPERTY ? card.color : (action.color || card.activeColor || card.colors[0]);
+
+    if (card.type === CARD_TYPES.PROPERTY_WILDCARD && card.colors !== 'all' && !card.colors.includes(color)) {
+      return { error: `Invalid color! This wildcard is for ${COLOR_NAMES[card.colors[0]] || card.colors[0]} or ${COLOR_NAMES[card.colors[1]] || card.colors[1]}.` };
+    }
+
+    player.hand.splice(cardIndex, 1);
     if (!player.properties[color]) player.properties[color] = [];
     if (card.type === CARD_TYPES.PROPERTY_WILDCARD) card.activeColor = color;
     player.properties[color].push(card);
@@ -137,9 +177,9 @@ export class GameEngine {
         case ACTION_TYPES.DEAL_BREAKER:
           result = this._handleDealBreaker(player, action); break;
         case ACTION_TYPES.HOUSE:
-          result = this._handleHouse(player, action); break;
+          result = this._handleHouse(player, action, card); break;
         case ACTION_TYPES.HOTEL:
-          result = this._handleHotel(player, action); break;
+          result = this._handleHotel(player, action, card); break;
         case ACTION_TYPES.JUST_SAY_NO:
           result = { error: 'Just Say No is played as a response' }; break;
         case ACTION_TYPES.DOUBLE_RENT:
@@ -177,8 +217,8 @@ export class GameEngine {
 
     // Check for house/hotel
     const props = player.properties[color] || [];
-    if (props.some(c => c._hasHouse)) amount += HOUSE_RENT_BONUS;
-    if (props.some(c => c._hasHotel)) amount += HOTEL_RENT_BONUS;
+    if (props.some(c => c.action === ACTION_TYPES.HOUSE)) amount += HOUSE_RENT_BONUS;
+    if (props.some(c => c.action === ACTION_TYPES.HOTEL)) amount += HOTEL_RENT_BONUS;
 
     if (action.doubled) amount *= 2;
 
@@ -310,27 +350,35 @@ export class GameEngine {
     return { success: true, type: 'deal_breaker' };
   }
 
-  _handleHouse(player, action) {
+  _handleHouse(player, action, card) {
     if (!action.targetColor) return { error: 'Must specify color' };
     if (action.targetColor === COLORS.RAILROAD || action.targetColor === COLORS.UTILITY) {
       return { error: 'Cannot add house to Black/Mint Green' };
     }
     if (!this._isSetComplete(player, action.targetColor)) return { error: 'Set must be complete' };
     const props = player.properties[action.targetColor];
-    if (props.some(c => c._hasHouse)) return { error: 'Already has a house' };
-    props[0]._hasHouse = true;
+    if (props.some(c => c.action === ACTION_TYPES.HOUSE)) return { error: 'Already has a house' };
+    
+    // Remove from discard pile (it was pushed optimistically)
+    this.discardPile.pop();
+    props.push(card);
+    
     this.addLog(`${player.name} built a House on ${COLOR_NAMES[action.targetColor] || action.targetColor}`);
     this._checkAutoEndTurn(player);
     return { success: true, type: 'house' };
   }
 
-  _handleHotel(player, action) {
+  _handleHotel(player, action, card) {
     if (!action.targetColor) return { error: 'Must specify color' };
     if (!this._isSetComplete(player, action.targetColor)) return { error: 'Set must be complete' };
     const props = player.properties[action.targetColor];
-    if (!props.some(c => c._hasHouse)) return { error: 'Must have a house first' };
-    if (props.some(c => c._hasHotel)) return { error: 'Already has a hotel' };
-    props[0]._hasHotel = true;
+    if (!props.some(c => c.action === ACTION_TYPES.HOUSE)) return { error: 'Must have a house first' };
+    if (props.some(c => c.action === ACTION_TYPES.HOTEL)) return { error: 'Already has a hotel' };
+    
+    // Remove from discard pile
+    this.discardPile.pop();
+    props.push(card);
+
     this.addLog(`${player.name} built a Hotel on ${COLOR_NAMES[action.targetColor] || action.targetColor}`);
     this._checkAutoEndTurn(player);
     return { success: true, type: 'hotel' };

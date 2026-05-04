@@ -129,11 +129,11 @@ export class BotAI {
       return;
     }
 
-    // Pay with bank first, then cheapest properties
+    // Pay with bank first, then cheapest properties (exclude 0-value wildcards)
     const available = [
       ...player.bank.map(c => ({ ...c, source: 'bank' })),
       ...Object.values(player.properties).flat().map(c => ({ ...c, source: 'property' })),
-    ].sort((a, b) => (a.value || 0) - (b.value || 0));
+    ].filter(c => c.value > 0).sort((a, b) => a.value - b.value);
 
     let total = 0;
     const payWith = [];

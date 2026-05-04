@@ -161,6 +161,18 @@ io.on('connection', (socket) => {
     processBots(room);
   });
 
+  socket.on('move-wildcard', ({ cardId, color }, cb) => {
+    const playerId = socketPlayers.get(socket.id);
+    const room = rooms.getRoomForPlayer(playerId);
+    if (!room?.game) return cb({ error: 'No active game' });
+    const result = room.game.moveWildcard(playerId, cardId, color);
+    if (!result.error) {
+      broadcastState(room);
+      processBots(room);
+    }
+    cb(result);
+  });
+
   socket.on('end-turn', (_, cb) => {
     const playerId = socketPlayers.get(socket.id);
     const room = rooms.getRoomForPlayer(playerId);

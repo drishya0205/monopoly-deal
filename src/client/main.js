@@ -187,14 +187,37 @@ function renderGame() {
   deckDiv.appendChild(drawPile);
   center.appendChild(deckDiv);
 
+  const discDiv = document.createElement('div');
+  discDiv.className = 'deck-pile';
+  discDiv.innerHTML = '<span class="label">DISCARD/PLAY</span>';
+  
   if (gs.discardPile?.length > 0) {
-    const discDiv = document.createElement('div');
-    discDiv.className = 'deck-pile';
-    discDiv.innerHTML = '<span class="label">DISCARD</span>';
     const topCard = gs.discardPile[gs.discardPile.length - 1];
     discDiv.appendChild(renderCard(topCard, {}));
-    center.appendChild(discDiv);
+  } else {
+    discDiv.innerHTML += '<div class="card empty-card" style="border:2px dashed rgba(255,255,255,0.2)"></div>';
   }
+
+  // Action/Rent dropzone
+  if (isMyTurn && gs.phase === PHASES.PLAY) {
+    discDiv.ondragover = (e) => { e.preventDefault(); discDiv.classList.add('drag-over'); };
+    discDiv.ondragleave = () => { discDiv.classList.remove('drag-over'); };
+    discDiv.ondrop = async (e) => {
+      e.preventDefault();
+      discDiv.classList.remove('drag-over');
+      const data = e.dataTransfer.getData('text/plain');
+      if (data && data.startsWith('hand:')) {
+        const cardId = data.split(':')[1];
+        const card = me.hand?.find(c => c.id === cardId);
+        if (card && (card.type === CARD_TYPES.ACTION || card.type === CARD_TYPES.RENT)) {
+          await handleActionPlay(card, gs);
+        } else {
+          showToast('❌ Only Action and Rent cards can be played here!');
+        }
+      }
+    };
+  }
+  center.appendChild(discDiv);
 
   // Game log
   const logEl = document.getElementById('gameLog');
@@ -226,16 +249,60 @@ function renderGame() {
 }
 
 function renderPropertySets(container, player) {
-  for (const [color, cards] of Object.entries(player.properties || {})) {
-    if (!cards || cards.length === 0) continue;
+  const isMe = player.id === state.playerId;
+  const isMyTurn = state.gameState?.currentPlayerId === state.playerId;
+  const canMove = isMe && isMyTurn && state.gameState?.phase === PHASES.PLAY;
+
+  const allColors = Object.keys(COLOR_NAMES);
+  for (const color of allColors) {
+    const cards = player.properties?.[color] || [];
+    if (!isMe && cards.length === 0) continue;
+    if (isMe && cards.length === 0 && !canMove) continue; // Only show empty dropzones when we can move
     
     const setDiv = document.createElement('div');
-    setDiv.className = 'property-set';
+    setDiv.className = `property-set ${cards.length === 0 ? 'empty-set' : ''}`;
+    setDiv.dataset.color = color;
+
+    // Drop zone logic
+    if (canMove) {
+      setDiv.ondragover = (e) => { e.preventDefault(); setDiv.classList.add('drag-over'); };
+      setDiv.ondragleave = () => { setDiv.classList.remove('drag-over'); };
+      setDiv.ondrop = async (e) => {
+        e.preventDefault();
+        setDiv.classList.remove('drag-over');
+        const data = e.dataTransfer.getData('text/plain');
+        if (!data) return;
+        
+        if (data.startsWith('hand:')) {
+          const cardId = data.split(':')[1];
+          const result = await emit('play-card', { cardId, action: { type: 'property', color } });
+          if (result?.error) showToast(`❌ ${result.error}`);
+        } else {
+          const result = await emit('move-wildcard', { cardId: data, color });
+          if (result?.error) showToast(`❌ ${result.error}`);
+        }
+      };
+    }
     
-    cards.forEach((card) => {
-      const el = renderCard(card, {});
-      setDiv.appendChild(el);
-    });
+    if (cards.length === 0) {
+      setDiv.innerHTML = `<div class="empty-set-label">${COLOR_NAMES[color]}</div>`;
+    } else {
+      cards.forEach((card) => {
+        const el = renderCard(card, {});
+        // Drag logic for wildcards
+        if (canMove && card.type === CARD_TYPES.PROPERTY_WILDCARD) {
+          el.draggable = true;
+          el.ondragstart = (e) => {
+            e.dataTransfer.setData('text/plain', card.id);
+            document.body.classList.add('is-dragging');
+          };
+          el.ondragend = () => {
+            document.body.classList.remove('is-dragging');
+          };
+        }
+        setDiv.appendChild(el);
+      });
+    }
     
     container.appendChild(setDiv);
   }
@@ -256,6 +323,22 @@ function renderYourArea(me, gs, isMyTurn) {
   const bankDiv = document.createElement('div');
   bankDiv.className = 'your-bank';
   bankDiv.innerHTML = `<span class="label">Bank</span><span class="total">${bankTotal}M</span>`;
+  
+  // Bank dropzone
+  if (isMyTurn && gs.phase === PHASES.PLAY) {
+    bankDiv.ondragover = (e) => { e.preventDefault(); bankDiv.classList.add('drag-over'); };
+    bankDiv.ondragleave = () => { bankDiv.classList.remove('drag-over'); };
+    bankDiv.ondrop = async (e) => {
+      e.preventDefault();
+      bankDiv.classList.remove('drag-over');
+      const data = e.dataTransfer.getData('text/plain');
+      if (data && data.startsWith('hand:')) {
+        const cardId = data.split(':')[1];
+        const result = await emit('play-card', { cardId, action: 'bank' });
+        if (result?.error) showToast(`❌ ${result.error}`);
+      }
+    };
+  }
   area.appendChild(bankDiv);
 
   // Hand
@@ -276,6 +359,19 @@ function renderYourArea(me, gs, isMyTurn) {
         render();
       }
     });
+    
+    // Make hand cards draggable
+    if (canPlay) {
+      el.draggable = true;
+      el.ondragstart = (e) => {
+        e.dataTransfer.setData('text/plain', `hand:${card.id}`);
+        document.body.classList.add('is-dragging');
+      };
+      el.ondragend = () => {
+        document.body.classList.remove('is-dragging');
+      };
+    }
+    
     handDiv.appendChild(el);
   });
   area.appendChild(handDiv);
@@ -296,8 +392,12 @@ function renderYourArea(me, gs, isMyTurn) {
     if (sel && playsLeft > 0) {
       // Property play
       if (sel.type === CARD_TYPES.PROPERTY || sel.type === CARD_TYPES.PROPERTY_WILDCARD) {
-        const btn = makeBtn('🏠 Play Property', 'btn-success btn-sm', () => {
-          const color = sel.type === CARD_TYPES.PROPERTY ? undefined : (sel.colors === 'all' ? promptColor() : sel.colors[0]);
+        const btn = makeBtn('🏠 Play Property', 'btn-success btn-sm', async () => {
+          let color;
+          if (sel.type === CARD_TYPES.PROPERTY_WILDCARD) {
+            color = sel.colors === 'all' ? await promptColor() : await promptColorFromList(sel.colors);
+            if (!color) return; // Cancelled
+          }
           emit('play-card', { cardId: sel.id, action: { type: 'property', color } });
           state.selectedCard = null;
         });
@@ -534,12 +634,33 @@ function renderVictory() {
   const winner = gs?.players?.find(p => p.id === gs.winner);
   const isMe = gs?.winner === state.playerId;
 
+  const insightsHtml = gs?.players.map(p => {
+    const totalBank = p.bank.reduce((sum, c) => sum + (c.value || 0), 0);
+    const totalProps = Object.values(p.properties || {}).flat().length;
+    return `
+      <div class="insight-row ${p.id === gs.winner ? 'winner-row' : ''}">
+        <div class="insight-name">${p.name} ${p.id === gs.winner ? '🏆' : ''}</div>
+        <div class="insight-stat"><span>Sets:</span> ${p.setsCompleted}</div>
+        <div class="insight-stat"><span>Properties:</span> ${totalProps}</div>
+        <div class="insight-stat"><span>Bank:</span> ${totalBank}M</div>
+      </div>
+    `;
+  }).join('');
+
   app.innerHTML = `
     <div class="victory-screen">
       <div class="confetti-container" id="confetti"></div>
       <h1 class="victory-title">${isMe ? '🎉 You Win!' : '🏆 Game Over!'}</h1>
       <p class="victory-winner">${winner?.name || 'Unknown'} wins with ${winner?.setsCompleted || 3} complete sets!</p>
-      <button class="btn btn-primary btn-lg" onclick="location.reload()">🔄 Play Again</button>
+      
+      <div class="insights-board glass-strong">
+        <h3>Game Insights</h3>
+        <div class="insights-list">
+          ${insightsHtml}
+        </div>
+      </div>
+
+      <button class="btn btn-primary btn-lg" onclick="location.reload()" style="margin-top: 24px;">🔄 Play Again</button>
     </div>`;
 
   // Confetti

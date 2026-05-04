@@ -53,6 +53,7 @@ function buildPropertyCard(card) {
   const setSize = SET_SIZES[card.color] || 2;
 
   return `
+    <div class="card-glare"></div>
     <div class="card-value">${card.value}M</div>
     <div class="card-header" style="background: ${color}">${name}</div>
     <div class="card-body">
@@ -67,6 +68,7 @@ function buildPropertyCard(card) {
 function buildWildcardCard(card) {
   if (card.colors === 'all') {
     return `
+      <div class="card-glare"></div>
       <div class="card-header">🌈 WILD</div>
       <div class="card-body">
         <div class="card-name">Property<br>Wildcard</div>
@@ -77,6 +79,7 @@ function buildWildcardCard(card) {
   const c1 = COLOR_NAMES[card.colors[0]] || card.colors[0];
   const c2 = COLOR_NAMES[card.colors[1]] || card.colors[1];
   return `
+    <div class="card-glare"></div>
     <div class="card-value">${card.value}M</div>
     <div class="card-header">${c1} / ${c2}</div>
     <div class="card-body">
@@ -88,6 +91,7 @@ function buildWildcardCard(card) {
 
 function buildMoneyCard(card) {
   return `
+    <div class="card-glare"></div>
     <div class="card-header">MONEY</div>
     <div class="card-body">
       <div class="money-amount">${card.value}M</div>
@@ -103,6 +107,7 @@ function buildActionCard(card) {
     double_rent: '✖️2',
   };
   return `
+    <div class="card-glare"></div>
     <div class="card-value">${card.value}M</div>
     <div class="card-header">${icons[card.action] || '⚡'} ACTION</div>
     <div class="card-body">
@@ -115,6 +120,7 @@ function buildActionCard(card) {
 function buildRentCard(card) {
   if (card.colors === 'all') {
     return `
+      <div class="card-glare"></div>
       <div class="card-value">${card.value}M</div>
       <div class="card-header" style="background: linear-gradient(90deg, #DC143C, #FF8C00, #FFD700, #228B22, #1a1acd)">WILD RENT</div>
       <div class="card-body">
@@ -128,6 +134,7 @@ function buildRentCard(card) {
   const n1 = COLOR_NAMES[card.colors[0]] || '';
   const n2 = COLOR_NAMES[card.colors[1]] || '';
   return `
+    <div class="card-glare"></div>
     <div class="card-value">${card.value}M</div>
     <div class="card-header" style="background: linear-gradient(90deg, ${c1}, ${c2})">${n1} / ${n2}</div>
     <div class="card-body">
