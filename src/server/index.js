@@ -145,6 +145,11 @@ io.on('connection', (socket) => {
     const room = rooms.getRoomForPlayer(playerId);
     if (!room?.game) return cb({ error: 'No active game' });
     const result = room.game.drawCards(playerId);
+    // Debug: log the draw result per request
+    if (result && result.drawn) {
+      // eslint-disable-next-line no-console
+      console.log(`[DrawRequest] ${playerId} drew ${result.drawn.length} card(s)`);
+    }
     if (result.error) return cb({ error: result.error });
     broadcastState(room);
     cb({ success: true });

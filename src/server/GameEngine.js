@@ -49,6 +49,15 @@ export class GameEngine {
     const count = player.hand.length === 0 ? CARDS_TO_DRAW_EMPTY_HAND : CARDS_TO_DRAW;
     this._refillDeckIfNeeded();
     const drawn = this.drawPile.splice(0, Math.min(count, this.drawPile.length));
+    // Debug: log draw details to help diagnose UI draw issues in development
+    if (drawn && drawn.length > 0) {
+      const ids = drawn.map(c => c.id).join(',');
+      // eslint-disable-next-line no-console
+      console.log(`[Draw] player=${player.name} drew ${drawn.length} card(s) from pile, ids=[${ids}]`);
+    } else {
+      // eslint-disable-next-line no-console
+      console.log(`[Draw] player=${player?.name ?? 'unknown'} drew 0 cards (pile empty?)`);
+    }
     player.hand.push(...drawn);
     this.phase = PHASES.PLAY;
     this.playsThisTurn = 0;
@@ -99,18 +108,32 @@ export class GameEngine {
     }
 
     if (!card) return { error: 'Card not found in your properties' };
-    if (card.type !== CARD_TYPES.PROPERTY_WILDCARD) return { error: 'Card is not a wildcard' };
-    if (card.colors !== 'all' && !card.colors.includes(newColor)) return { error: 'Invalid color for this wildcard' };
-    if (oldColor === newColor) return { error: 'Card is already in that color set' };
+    
+    if (card.type === CARD_TYPES.PROPERTY_WILDCARD) {
+      if (card.colors !== 'all' && !card.colors.includes(newColor)) return { error: 'Invalid color for this wildcard' };
+      if (oldColor === newColor) return { error: 'Card is already in that color set' };
+      card.activeColor = newColor;
+    } else if (card.type === CARD_TYPES.ACTION && (card.action === ACTION_TYPES.HOUSE || card.action === ACTION_TYPES.HOTEL)) {
+      if (oldColor === newColor) return { error: 'Card is already in that color set' };
+      if (!this._isSetComplete(player, newColor)) return { error: 'Target set must be complete to add a House/Hotel' };
+      const newProps = player.properties[newColor] || [];
+      if (card.action === ACTION_TYPES.HOUSE) {
+        if (newProps.some(c => c.action === ACTION_TYPES.HOUSE)) return { error: 'Target set already has a house' };
+      } else if (card.action === ACTION_TYPES.HOTEL) {
+        if (!newProps.some(c => c.action === ACTION_TYPES.HOUSE)) return { error: 'Target set must have a house first' };
+        if (newProps.some(c => c.action === ACTION_TYPES.HOTEL)) return { error: 'Target set already has a hotel' };
+      }
+    } else {
+      return { error: 'Card is not a wildcard, house, or hotel' };
+    }
 
     // Move it
     player.properties[oldColor].splice(idx, 1);
-    card.activeColor = newColor;
     if (!player.properties[newColor]) player.properties[newColor] = [];
     player.properties[newColor].push(card);
 
     this._updateCompletedSets(player);
-    this.addLog(`${player.name} moved a wildcard to ${COLOR_NAMES[newColor] || newColor}`);
+    this.addLog(`${player.name} moved a ${card.name} to ${COLOR_NAMES[newColor] || newColor}`);
     
     if (this._checkWin(player)) return { success: true, type: 'move_wildcard', winner: player.id };
     return { success: true, type: 'move_wildcard' };
@@ -450,7 +473,10 @@ export class GameEngine {
     const player = this.getPlayer(playerId);
     // Discard excess cards
     if (player.hand.length > MAX_HAND_SIZE) {
-      return { error: 'Must discard to 7 cards first', needsDiscard: true, excess: player.hand.length - MAX_HAND_SIZE };
+      this.phase = PHASES.DISCARD;
+      const excess = player.hand.length - MAX_HAND_SIZE;
+      this.addLog(`${player.name} must discard ${excess} cards`);
+      return { success: true, phase: PHASES.DISCARD, needsDiscard: true, excess };
     }
 
     this._advanceTurn();
@@ -513,6 +539,7 @@ export class GameEngine {
     if (this.playsThisTurn >= MAX_PLAYS_PER_TURN && this.phase === PHASES.PLAY) {
       if (player.hand.length > MAX_HAND_SIZE) {
         this.phase = PHASES.DISCARD;
+        this.addLog(`${player.name} used all plays and must discard ${player.hand.length - MAX_HAND_SIZE} cards`);
       } else {
         // All plays used and hand size is fine — auto-advance the turn
         this._advanceTurn();

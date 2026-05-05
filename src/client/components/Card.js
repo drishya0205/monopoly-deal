@@ -1,9 +1,15 @@
-import { CARD_TYPES, COLOR_HEX, COLOR_NAMES, RENT_VALUES, SET_SIZES } from '../../shared/constants.js';
+import { CARD_TYPES, COLOR_HEX, COLOR_NAMES, RENT_VALUES, SET_SIZES, ACTION_TYPES } from '../../shared/constants.js';
 
 const PROP_COLORS = {
   brown: '#8B4513', light_blue: '#87CEEB', pink: '#E91E90', orange: '#FF8C00',
   red: '#DC143C', yellow: '#FFD700', green: '#228B22', dark_blue: '#1a1acd',
-  railroad: '#000000', utility: '#98FF98',
+  railroad: '#2d2d2d', utility: '#98FF98',
+};
+
+const PROP_ICONS = {
+  brown: '🏚️', light_blue: '🏠', pink: '🏡', orange: '🏘️',
+  red: '🏢', yellow: '🏬', green: '🏗️', dark_blue: '🏰',
+  railroad: '🚂', utility: '💡',
 };
 
 export function renderCard(card, opts = {}) {
@@ -51,15 +57,29 @@ function buildPropertyCard(card) {
   const name = COLOR_NAMES[card.color] || card.color;
   const rents = RENT_VALUES[card.color] || [];
   const setSize = SET_SIZES[card.color] || 2;
+  const icon = PROP_ICONS[card.color] || '🏠';
 
   return `
-    <div class="card-glare"></div>
-    <div class="card-value">${card.value}M</div>
-    <div class="card-header" style="background: ${color}">${name}</div>
-    <div class="card-body">
-      <div class="card-name">${card.name}</div>
-      <div class="card-footer" style="margin-top: auto;">
-        ${rents.map((r, i) => `<span class="rent-dot" style="opacity:${i < setSize ? 1 : 0.3}">${i + 1}→${r}M</span>`).join(' ')}
+    <div class="card-inner">
+      <div class="card-border" style="border-color: ${color}40"></div>
+      <div class="card-glare"></div>
+      <div class="card-header" style="background: ${color}">
+        <span class="header-icon">${icon}</span>
+        <span class="header-text">${name}</span>
+      </div>
+      <div class="card-body">
+        <div class="card-name">${card.name}</div>
+      </div>
+      <div class="card-footer">
+        <div class="value-badge">${card.value}M</div>
+        <div class="rent-table">
+          ${rents.map((r, i) => `
+            <div class="rent-row ${i < setSize ? 'active' : ''}">
+              <span class="rent-houses">${i === 0 ? 'Base' : i + '🏠'}</span>
+              <span class="rent-val">${r}M</span>
+            </div>
+          `).join('')}
+        </div>
       </div>
     </div>
   `;
@@ -68,51 +88,97 @@ function buildPropertyCard(card) {
 function buildWildcardCard(card) {
   if (card.colors === 'all') {
     return `
-      <div class="card-glare"></div>
-      <div class="card-header">🌈 WILD</div>
-      <div class="card-body">
-        <div class="card-name">Property<br>Wildcard</div>
-        <div class="card-description">Use as any color</div>
+      <div class="card-inner">
+        <div class="card-glare"></div>
+        <div class="card-header rainbow-header">
+          <span class="header-icon">🌈</span>
+          <span class="header-text">WILD</span>
+        </div>
+        <div class="card-body wildcard-body">
+          <div class="wildcard-symbol">✨</div>
+          <div class="card-name">Any Property</div>
+        </div>
+        <div class="card-footer">
+          <div class="value-badge wildcard-value">—</div>
+          <div class="wildcard-desc">Use as any color</div>
+        </div>
       </div>
     `;
   }
   const c1 = COLOR_NAMES[card.colors[0]] || card.colors[0];
   const c2 = COLOR_NAMES[card.colors[1]] || card.colors[1];
+  const icon1 = PROP_ICONS[card.colors[0]] || '🏠';
+  const icon2 = PROP_ICONS[card.colors[1]] || '🏠';
   return `
-    <div class="card-glare"></div>
-    <div class="card-value">${card.value}M</div>
-    <div class="card-header">${c1} / ${c2}</div>
-    <div class="card-body">
-      <div class="card-name">Property<br>Wildcard</div>
-      <div class="card-description">${c1} or ${c2}</div>
+    <div class="card-inner">
+      <div class="card-glare"></div>
+      <div class="card-header wildcard-header">
+        <span class="header-icon">${icon1} ${icon2}</span>
+        <span class="header-text">${c1} / ${c2}</span>
+      </div>
+      <div class="card-body wildcard-body">
+        <div class="wildcard-symbol">🔀</div>
+        <div class="card-name">Property Wild</div>
+      </div>
+      <div class="card-footer">
+        <div class="value-badge">${card.value}M</div>
+        <div class="wildcard-desc">Choose one color</div>
+      </div>
     </div>
   `;
 }
 
 function buildMoneyCard(card) {
+  const isHighValue = card.value >= 5;
   return `
-    <div class="card-glare"></div>
-    <div class="card-header">MONEY</div>
-    <div class="card-body">
-      <div class="money-amount">${card.value}M</div>
-      <div class="money-label">Million</div>
+    <div class="card-inner">
+      <div class="card-glare"></div>
+      <div class="card-header money-header">
+        <span class="header-icon">${isHighValue ? '💎' : '💵'}</span>
+        <span class="header-text">MONEY</span>
+      </div>
+      <div class="card-body money-body">
+        <div class="money-amount">${card.value}M</div>
+        <div class="money-subtitle">${isHighValue ? 'High Value' : 'Million'}</div>
+      </div>
+      <div class="card-footer money-footer">
+        <div class="money-pattern"></div>
+      </div>
     </div>
   `;
 }
 
 function buildActionCard(card) {
-  const icons = {
-    deal_breaker: '💥', just_say_no: '🚫', sly_deal: '🦊', forced_deal: '🔄',
-    debt_collector: '💰', birthday: '🎂', pass_go: '▶️', house: '🏠', hotel: '🏨',
-    double_rent: '✖️2',
+  const config = {
+    [ACTION_TYPES.DEAL_BREAKER]: { icon: '💥', accent: '#ff3333', gradient: 'linear-gradient(135deg, #ff3333, #cc0000)' },
+    [ACTION_TYPES.JUST_SAY_NO]: { icon: '🛡️', accent: '#4a90d9', gradient: 'linear-gradient(135deg, #4a90d9, #2c5f8a)' },
+    [ACTION_TYPES.SLY_DEAL]: { icon: '🦊', accent: '#ff9800', gradient: 'linear-gradient(135deg, #ff9800, #e65100)' },
+    [ACTION_TYPES.FORCED_DEAL]: { icon: '🔄', accent: '#9c27b0', gradient: 'linear-gradient(135deg, #9c27b0, #6a1b9a)' },
+    [ACTION_TYPES.DEBT_COLLECTOR]: { icon: '💰', accent: '#4caf50', gradient: 'linear-gradient(135deg, #4caf50, #2e7d32)' },
+    [ACTION_TYPES.BIRTHDAY]: { icon: '🎂', accent: '#e91e63', gradient: 'linear-gradient(135deg, #e91e63, #c2185b)' },
+    [ACTION_TYPES.PASS_GO]: { icon: '⏩', accent: '#2196f3', gradient: 'linear-gradient(135deg, #2196f3, #1565c0)' },
+    [ACTION_TYPES.HOUSE]: { icon: '🏠', accent: '#795548', gradient: 'linear-gradient(135deg, #795548, #4e342e)' },
+    [ACTION_TYPES.HOTEL]: { icon: '🏨', accent: '#607d8b', gradient: 'linear-gradient(135deg, #607d8b, #37474f)' },
+    [ACTION_TYPES.DOUBLE_RENT]: { icon: '✖️', accent: '#ff5722', gradient: 'linear-gradient(135deg, #ff5722, #d84315)' },
   };
+
+  const cfg = config[card.action] || { icon: '⚡', accent: '#7c3aed', gradient: 'linear-gradient(135deg, #7c3aed, #5b21b6)' };
+
   return `
-    <div class="card-glare"></div>
-    <div class="card-value">${card.value}M</div>
-    <div class="card-header">${icons[card.action] || '⚡'} ACTION</div>
-    <div class="card-body">
-      <div class="card-name">${card.label}</div>
-      <div class="card-description">${card.description}</div>
+    <div class="card-inner">
+      <div class="card-glare"></div>
+      <div class="card-header action-header" style="background: ${cfg.gradient}">
+        <span class="header-icon action-icon">${cfg.icon}</span>
+        <span class="header-text">${card.label}</span>
+      </div>
+      <div class="card-body action-body">
+        <div class="action-icon-large">${cfg.icon}</div>
+        <div class="action-description">${card.description}</div>
+      </div>
+      <div class="card-footer action-footer">
+        <div class="value-badge action-value">${card.value}M</div>
+        <div class="action-type-badge">ACTION</div>
+      </div>
     </div>
   `;
 }
@@ -120,12 +186,21 @@ function buildActionCard(card) {
 function buildRentCard(card) {
   if (card.colors === 'all') {
     return `
-      <div class="card-glare"></div>
-      <div class="card-value">${card.value}M</div>
-      <div class="card-header" style="background: linear-gradient(90deg, #DC143C, #FF8C00, #FFD700, #228B22, #1a1acd)">WILD RENT</div>
-      <div class="card-body">
-        <div class="card-name">Rent</div>
-        <div class="card-description">Charge one player rent for any color</div>
+      <div class="card-inner">
+        <div class="card-glare"></div>
+        <div class="card-header rainbow-header">
+          <span class="header-icon">🌈</span>
+          <span class="header-text">WILD RENT</span>
+        </div>
+        <div class="card-body rent-body">
+          <div class="rent-icon-large">💲</div>
+          <div class="card-name">Collect Rent</div>
+          <div class="card-description">Any color property</div>
+        </div>
+        <div class="card-footer rent-footer">
+          <div class="value-badge">${card.value}M</div>
+          <div class="rent-label">RENT</div>
+        </div>
       </div>
     `;
   }
@@ -133,13 +208,25 @@ function buildRentCard(card) {
   const c2 = PROP_COLORS[card.colors[1]] || '#aaa';
   const n1 = COLOR_NAMES[card.colors[0]] || '';
   const n2 = COLOR_NAMES[card.colors[1]] || '';
+  const icon1 = PROP_ICONS[card.colors[0]] || '🏠';
+  const icon2 = PROP_ICONS[card.colors[1]] || '🏠';
+
   return `
-    <div class="card-glare"></div>
-    <div class="card-value">${card.value}M</div>
-    <div class="card-header" style="background: linear-gradient(90deg, ${c1}, ${c2})">${n1} / ${n2}</div>
-    <div class="card-body">
-      <div class="card-name">Rent</div>
-      <div class="card-description">Charge all players rent</div>
+    <div class="card-inner">
+      <div class="card-glare"></div>
+      <div class="card-header rent-header" style="background: linear-gradient(90deg, ${c1}, ${c2})">
+        <span class="header-icon">${icon1} ${icon2}</span>
+        <span class="header-text">${n1} / ${n2}</span>
+      </div>
+      <div class="card-body rent-body">
+        <div class="rent-icon-large">💲</div>
+        <div class="card-name">Collect Rent</div>
+        <div class="card-description">From all players</div>
+      </div>
+      <div class="card-footer rent-footer">
+        <div class="value-badge">${card.value}M</div>
+        <div class="rent-label">RENT</div>
+      </div>
     </div>
   `;
 }
@@ -155,15 +242,28 @@ function renderMiniCard(card, opts = {}) {
 
   if (card.type === CARD_TYPES.PROPERTY) {
     bg = PROP_COLORS[card.color] || '#888';
-    label = card.name?.split(' ').map(w => w[0]).join('') || '?';
+    label = PROP_ICONS[card.color] || '?';
   } else if (card.type === CARD_TYPES.PROPERTY_WILDCARD) {
     if (card.colors === 'all') {
       bg = 'linear-gradient(135deg, #DC143C, #228B22, #1a1acd)';
       label = '🌈';
     } else {
       bg = `linear-gradient(135deg, ${PROP_COLORS[card.colors[0]]}, ${PROP_COLORS[card.colors[1]]})`;
-      label = 'W';
+      label = '🔀';
     }
+  } else if (card.type === CARD_TYPES.MONEY) {
+    bg = 'linear-gradient(135deg, #c8a84e, #dab955)';
+    label = '💵';
+  } else if (card.type === CARD_TYPES.ACTION) {
+    bg = 'linear-gradient(135deg, #7c3aed, #a855f7)';
+    label = '⚡';
+  } else if (card.type === CARD_TYPES.RENT) {
+    if (card.colors === 'all') {
+      bg = 'linear-gradient(135deg, #DC143C, #FFD700, #228B22)';
+    } else {
+      bg = `linear-gradient(135deg, ${PROP_COLORS[card.colors[0]]}, ${PROP_COLORS[card.colors[1]]})`;
+    }
+    label = '💲';
   }
 
   el.style.background = bg;
@@ -175,6 +275,15 @@ function renderMiniCard(card, opts = {}) {
 export function renderCardBack(count) {
   const el = document.createElement('div');
   el.className = 'card-back';
-  el.innerHTML = `M.D.${count != null ? `<span class="count">${count}</span>` : ''}`;
+  el.innerHTML = `
+    <div class="card-back-inner">
+      <div class="card-back-pattern"></div>
+      <div class="card-back-logo">
+        <span class="logo-m">M</span>
+        <span class="logo-d">D</span>
+      </div>
+      ${count != null ? `<span class="count">${count}</span>` : ''}
+    </div>
+  `;
   return el;
 }

@@ -12,10 +12,10 @@ let paymentState = { active: false, selectedCardIds: new Set(), debtAmount: 0 };
 
 // --- Socket Events ---
 socket.on('room-updated', (room) => { state.room = room; render(); });
-socket.on('game-state', (gs) => {
-  const prevPhase = state.gameState?.phase;
-  state.gameState = gs;
-  state.screen = gs.winner ? 'victory' : 'game';
+  socket.on('game-state', (gs) => {
+    const prevPhase = state.gameState?.phase;
+    state.gameState = gs;
+    state.screen = gs.winner ? 'victory' : 'game';
 
   // If a payment overlay is active and we're still in payment phase, don't re-render the whole game
   // Just check if our debt was resolved (e.g. by Just Say No or we already paid)
@@ -31,14 +31,14 @@ socket.on('game-state', (gs) => {
     return;
   }
 
-  // If we left payment phase, clear payment state
+    // If we left payment phase, clear payment state
   if (gs.phase !== PHASES.PAYMENT) {
     paymentState.active = false;
     paymentState.selectedCardIds.clear();
   }
 
   render();
-});
+  });
 
 function emit(event, data = {}) {
   return new Promise((resolve) => socket.emit(event, data, resolve));
@@ -141,7 +141,10 @@ function renderGame() {
       <div class="game-topbar">
         <div class="turn-info">${isMyTurn ? "🎴 Your Turn" : `${gs.players[gs.currentPlayerIndex]?.name}'s Turn`}</div>
         <div class="plays-counter">${[0,1,2].map(i => `<div class="dot ${i < gs.playsThisTurn ? 'used' : ''}"></div>`).join('')}</div>
-        <div style="font-size:0.8rem;color:var(--text-muted)">Room: ${state.roomCode}</div>
+        <div style="font-size:0.8rem;color:var(--text-muted);display:flex;align-items:center;gap:12px;">
+          <span>Room: ${state.roomCode}</span>
+          <button id="rulesBtn" class="btn btn-secondary btn-sm" style="padding: 4px 8px; font-size: 0.75rem;">📜 Rules</button>
+        </div>
       </div>
       <div class="game-main">
         <div class="board-area">
@@ -158,6 +161,7 @@ function renderGame() {
 
   // Render opponents
   const opRow = document.getElementById('opponents');
+  document.getElementById('rulesBtn')?.addEventListener('click', showRulesModal);
   opponents.forEach(p => {
     const isActive = gs.currentPlayerId === p.id;
     const div = document.createElement('div');
@@ -275,7 +279,17 @@ function renderPropertySets(container, player) {
         
         if (data.startsWith('hand:')) {
           const cardId = data.split(':')[1];
-          const result = await emit('play-card', { cardId, action: { type: 'property', color } });
+          const me = state.gameState?.players.find(p => p.id === state.playerId);
+          const card = me?.hand?.find(c => c.id === cardId);
+          if (!card) return;
+
+          let result;
+          if (card.type === CARD_TYPES.ACTION && (card.action === ACTION_TYPES.HOUSE || card.action === ACTION_TYPES.HOTEL)) {
+            result = await emit('play-card', { cardId, action: { type: 'action', targetColor: color } });
+          } else {
+            result = await emit('play-card', { cardId, action: { type: 'property', color } });
+          }
+          
           if (result?.error) showToast(`❌ ${result.error}`);
         } else {
           const result = await emit('move-wildcard', { cardId: data, color });
@@ -288,9 +302,17 @@ function renderPropertySets(container, player) {
       setDiv.innerHTML = `<div class="empty-set-label">${COLOR_NAMES[color]}</div>`;
     } else {
       cards.forEach((card) => {
-        const el = renderCard(card, {});
-        // Drag logic for wildcards
-        if (canMove && card.type === CARD_TYPES.PROPERTY_WILDCARD) {
+        const isMovable = canMove && (card.type === CARD_TYPES.PROPERTY_WILDCARD || (card.type === CARD_TYPES.ACTION && (card.action === ACTION_TYPES.HOUSE || card.action === ACTION_TYPES.HOTEL)));
+        const el = renderCard(card, {
+          selected: state.selectedCard === card.id,
+          onClick: isMovable ? () => {
+            state.selectedCard = state.selectedCard === card.id ? null : card.id;
+            render();
+          } : undefined
+        });
+        
+        // Drag logic for wildcards and houses/hotels
+        if (isMovable) {
           el.draggable = true;
           el.ondragstart = (e) => {
             e.dataTransfer.setData('text/plain', card.id);
@@ -380,7 +402,13 @@ function renderYourArea(me, gs, isMyTurn) {
   if (isMyTurn && gs.phase === PHASES.PLAY) {
     const actDiv = document.createElement('div');
     actDiv.className = 'hand-actions';
-    const sel = me.hand?.find(c => c.id === state.selectedCard);
+    let sel = me.hand?.find(c => c.id === state.selectedCard);
+    let isBoardCard = false;
+    if (!sel) {
+      sel = Object.values(me.properties || {}).flat().find(c => c.id === state.selectedCard);
+      isBoardCard = !!sel;
+    }
+    
     const playsLeft = gs.playsRemaining ?? (3 - gs.playsThisTurn);
 
     // Plays remaining indicator
@@ -389,7 +417,7 @@ function renderYourArea(me, gs, isMyTurn) {
     playsInfo.textContent = playsLeft === 0 ? '⚠️ No plays left!' : `${playsLeft} play${playsLeft !== 1 ? 's' : ''} left`;
     actDiv.appendChild(playsInfo);
 
-    if (sel && playsLeft > 0) {
+    if (sel && !isBoardCard && playsLeft > 0) {
       // Property play
       if (sel.type === CARD_TYPES.PROPERTY || sel.type === CARD_TYPES.PROPERTY_WILDCARD) {
         const btn = makeBtn('🏠 Play Property', 'btn-success btn-sm', async () => {
@@ -418,14 +446,32 @@ function renderYourArea(me, gs, isMyTurn) {
           await handleActionPlay(sel, gs);
         }));
       }
-    } else if (sel && playsLeft === 0) {
+    }
+    
+    if (sel && isBoardCard) {
+      actDiv.appendChild(makeBtn('🔄 Move Property', 'btn-primary btn-sm', async () => {
+        let colors = Object.keys(COLOR_NAMES);
+        if (sel.type === CARD_TYPES.PROPERTY_WILDCARD && sel.colors !== 'all') {
+          colors = sel.colors;
+        }
+        const color = await promptColorFromList(colors);
+        if (color) {
+          const result = await emit('move-wildcard', { cardId: sel.id, color });
+          if (result?.error) showToast(`❌ ${result.error}`);
+        }
+        state.selectedCard = null;
+        render();
+      }));
+    }
+
+    if (sel && playsLeft === 0 && !isBoardCard) {
       showToast('⚠️ You\'ve used all 3 plays! End your turn.');
       state.selectedCard = null;
     }
 
     actDiv.appendChild(makeBtn('⏭ End Turn', 'btn-danger btn-sm', async () => {
       const result = await emit('end-turn');
-      if (result?.error && result?.needsDiscard) {
+      if (result?.needsDiscard) {
         showToast(`⚠️ You have ${me.hand?.length} cards — discard to 7 first!`);
       } else if (result?.error) {
         showToast(result.error);
@@ -515,6 +561,44 @@ async function handleActionPlay(card, gs) {
   }
   state.selectedCard = null;
   render();
+}
+
+function showRulesModal() {
+  let modal = document.getElementById('rulesModal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'rulesModal';
+    modal.className = 'rules-modal-overlay';
+    modal.innerHTML = `
+      <div class="rules-modal glass">
+        <div class="rules-header">
+          <h3 style="margin: 0; color: white;">📜 Quick Rules</h3>
+          <button class="btn-close" id="closeRules" style="background:transparent;border:none;color:white;font-size:1.2rem;cursor:pointer;">✕</button>
+        </div>
+        <div class="rules-body">
+          <ul style="padding-left: 20px; font-size: 0.9rem; line-height: 1.6; color: var(--text-light); margin-top: 15px;">
+            <li><strong>Goal:</strong> Be the first player to collect 3 complete property sets of different colors.</li>
+            <li><strong>Your Turn:</strong> Draw 2 cards at the start. You can play up to 3 cards per turn.</li>
+            <li><strong>Playing Cards:</strong> You can put money/action cards in your bank, play properties face up, or play action cards into the center.</li>
+            <li><strong>Paying Rent:</strong> If you are charged rent or fees, you must pay from your bank or properties on the table. Cards in your hand cannot be used to pay!</li>
+            <li><strong>Change:</strong> If you overpay a debt (e.g., pay 3M for a 2M debt), you do NOT get change back!</li>
+            <li><strong>End of Turn:</strong> You can only have 7 cards in your hand at the end of your turn. You must discard any extras.</li>
+            <li><strong>Drag and Drop:</strong> You can drag properties, wildcards, and houses directly from your hand to the board.</li>
+          </ul>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+    document.getElementById('closeRules').onclick = () => {
+      modal.classList.remove('open');
+    };
+    modal.onclick = (e) => {
+      if (e.target === modal) modal.classList.remove('open');
+    }
+  }
+  
+  // A small timeout allows the CSS transition to trigger when adding the class
+  setTimeout(() => modal.classList.add('open'), 10);
 }
 
 async function emitAction(cardId, action) {
